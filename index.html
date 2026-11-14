@@ -6,6 +6,7 @@
 <title>俞叶祺 · 17｜生日邀请函</title>
 <meta name="description" content="2026.11.19，俞叶祺十七岁。这一天上午，学校运动会也正好开幕。">
 <meta name="author" content="军师">
+<meta name="birthday-engine" content="three.js r158 · assets/vendor/three.min.js · 到点后启用">
 <meta name="theme-color" content="#08090a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
@@ -372,6 +373,10 @@ textarea{min-height:104px;resize:vertical}
 .is-warm .party{opacity:1}
 .is-warm .party.dim{opacity:.42}
 .balloons{position:absolute;inset:0}
+/* three.js 画布：只在 .is-3d 时显示，CSS 气球自动隐藏作为回退 */
+.balloon-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;pointer-events:none;opacity:0;transition:opacity .9s ease}
+.is-warm .party.is-3d .balloon-canvas{opacity:1}
+.party.is-3d .balloons{display:none}
 
 .balloon{
   position:absolute;padding:0;border:0;background:none;cursor:pointer;
@@ -496,7 +501,7 @@ textarea{min-height:104px;resize:vertical}
   .balloon__float,.balloon__sway{animation:none!important}
   .balloon__body,.balloon:hover .balloon__body,.balloon:focus-visible .balloon__body{transform:none!important;transition:none!important}
   .balloon.is-pop{animation:none!important;opacity:0;transition:opacity .01s}
-  .warm-glow,.party,.party-msg,.party-scrim{transition:none!important}
+  .warm-glow,.party,.party-msg,.party-scrim,.balloon-canvas{transition:none!important}
   .party-msg-inner{opacity:1!important;transform:none!important;animation:none!important}
   .conf,.pop-ring{display:none!important}
   .theme-transition *{transition:none!important}
@@ -660,6 +665,7 @@ textarea{min-height:104px;resize:vertical}
 <!-- ===================== 到点之后：暖光晕 / 3D 气球 / 碎屑 / 中央祝福 ===================== -->
 <div class="warm-glow" id="warmGlow" aria-hidden="true"></div>
 <div class="party" id="party">
+  <canvas class="balloon-canvas" id="balloonCanvas" role="img" aria-label="3D 气球，点一下会爆开"></canvas>
   <div class="balloons" id="balloons"></div>
 </div>
 <div class="party-scrim" id="partyScrim" aria-hidden="true"></div>
@@ -1148,13 +1154,40 @@ textarea{min-height:104px;resize:vertical}
     });
   }
 
-  /* ============================================================ 派对：3D 气球 / 祝福 / 碎屑 */
+  /* ============================================================
+     派对：真 3D 气球（three.js r158 · 本地 assets/vendor）+ 祝福 + 碎屑
+     - 到点前不初始化 WebGL、也不下载 three.js（省电省流量）
+     - 无 WebGL / 加载失败 → 自动回退到原来的纯 CSS 气球
+     ============================================================ */
+  var THREE_SRC = 'assets/vendor/three.min.js';
   var STRING_SVG = '<svg viewBox="0 0 22 80" fill="none" aria-hidden="true"><path d="M11 0c7 16.5-6 27.5 0 43s5 24.5 0 37" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+  /* 3D 气球在画面里的归一化位置（nx/ny ∈ [-1,1]，nz 深度，s 缩放） */
+  var LAYOUT_DESKTOP = [
+    { nx: -0.90, ny: 0.62, nz: -0.6, s: 1.06 },
+    { nx: -0.88, ny: 0.08, nz: 1.3, s: 0.7 },
+    { nx: 0.88, ny: 0.66, nz: -0.9, s: 1.12 },
+    { nx: 0.64, ny: 0.11, nz: 1.5, s: 0.72 },
+    { nx: -0.05, ny: 0.90, nz: -1.6, s: 0.6 },
+    { nx: 0.97, ny: -0.22, nz: 0.9, s: 0.72 }
+  ];
+  /* 手机：4 只，收在四角，不压正文 */
+  var LAYOUT_MOBILE = [
+    { nx: -0.86, ny: 0.88, nz: -0.2, s: 0.64 },
+    { nx: 0.90, ny: 0.86, nz: -0.6, s: 0.76 },
+    { nx: -0.98, ny: -0.86, nz: 0.6, s: 0.58 },
+    { nx: 1.02, ny: -0.92, nz: 0.9, s: 0.6 }
+  ];
+
   var balloonEls = [];
   var poppedCount = 0;
   var partyStarted = false;
   var parallaxBound = false;
   var msgEl = null, msgLineEl = null, msgSubEl = null, msgResetEl = null, msgTimer = null, scrimEl = null;
+  var activeEngine = 'css';    /* css | three */
+  var engine3d = null;
+  var threePromise = null;
+
+  function isSmallScreen() { return window.innerWidth <= 640; }
 
   function initParty() {
     if (partyStarted) return;
@@ -1165,11 +1198,13 @@ textarea{min-height:104px;resize:vertical}
     msgResetEl = $('#partyReset');
     scrimEl = $('#partyScrim');
     if (msgResetEl) msgResetEl.addEventListener('click', resetParty);
-    buildBalloons();
+    /* 先把 CSS 气球建好：既是加载过渡，也是无 WebGL 时的回退 */
+    buildCSSBalloons();
     bindParallax();
+    upgradeTo3D();
   }
 
-  function buildBalloons() {
+  function buildCSSBalloons() {
     var layer = $('#balloons');
     if (!layer) return;
     layer.innerHTML = '';
@@ -1197,6 +1232,21 @@ textarea{min-height:104px;resize:vertical}
     balloonEls = $$('#balloons .balloon');
   }
 
+  /* 当前这一轮要戳几只（CSS 手机端会隐藏几只，按实际可见数量算） */
+  function partyTargetCount() {
+    if (activeEngine === 'three' && engine3d) return engine3d.balloons.length;
+    var visible = balloonEls.filter(function (el) { return el.getClientRects().length > 0; });
+    return visible.length || CONFIG.party.balloons.length;
+  }
+
+  function afterPop(wish) {
+    if (poppedCount >= partyTargetCount()) {
+      showMessage('气球都戳完了。', '愿望已经全部说出口了 —— 十七岁，生日快乐。', 6000, true);
+    } else {
+      showMessage(wish, '', 3200, false);
+    }
+  }
+
   function popBalloon(btn, wish) {
     if (!btn || btn.classList.contains('is-pop')) return;
     var r = btn.getBoundingClientRect();
@@ -1210,13 +1260,7 @@ textarea{min-height:104px;resize:vertical}
       if (btn.parentNode) btn.parentNode.removeChild(btn);
       balloonEls = $$('#balloons .balloon');
     }, reduceMotion ? 0 : 340);
-    setTimeout(function () {
-      if (poppedCount >= CONFIG.party.balloons.length) {
-        showMessage('气球都戳完了。', '愿望已经全部说出口了 —— 十七岁，生日快乐。', 6000, true);
-      } else {
-        showMessage(wish, '', 3200, false);
-      }
-    }, reduceMotion ? 0 : 200);
+    setTimeout(function () { afterPop(wish); }, reduceMotion ? 0 : 200);
   }
 
   function ring(x, y) {
@@ -1281,6 +1325,499 @@ textarea{min-height:104px;resize:vertical}
     }, { passive: true });
   }
 
+  /* ---------- three.js 真 3D（懒加载，失败留在 CSS 气球） ---------- */
+  function supportsWebGL() {
+    try {
+      var c = document.createElement('canvas');
+      var gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
+      if (!gl) return false;
+      var lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function loadThree() {
+    if (threePromise) return threePromise;
+    threePromise = new Promise(function (resolve, reject) {
+      if (window.THREE && window.THREE.WebGLRenderer) { resolve(window.THREE); return; }
+      var s = document.createElement('script');
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        reject(new Error('three timeout'));
+      }, 15000);
+      s.src = THREE_SRC;
+      s.async = true;
+      s.onload = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (window.THREE && window.THREE.WebGLRenderer) resolve(window.THREE);
+        else reject(new Error('three missing'));
+      };
+      s.onerror = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(new Error('three load error'));
+      };
+      document.head.appendChild(s);
+    });
+    return threePromise;
+  }
+
+  function upgradeTo3D() {
+    if (activeEngine === 'three') return;
+    if (!supportsWebGL()) {
+      document.documentElement.setAttribute('data-engine', 'css');
+      return;
+    }
+    loadThree().then(function () {
+      try {
+        start3D();
+      } catch (e) {
+        engine3d = null;
+        document.documentElement.setAttribute('data-engine', 'css');
+      }
+    }, function () {
+      document.documentElement.setAttribute('data-engine', 'css');
+    });
+  }
+
+  function start3D() {
+    var THREE = window.THREE;
+    var canvas = $('#balloonCanvas');
+    if (!THREE || !THREE.WebGLRenderer || !canvas) throw new Error('three not ready');
+
+    var renderer = new THREE.WebGLRenderer({
+      canvas: canvas, alpha: true, antialias: false, powerPreference: 'low-power'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 120);
+    var CAM_Z = 13;
+    camera.position.set(0, 0, CAM_Z);
+    camera.lookAt(0, 0, 0);
+
+    scene.add(new THREE.AmbientLight(0xffd7ae, 0.75));
+    var keyLight = new THREE.DirectionalLight(0xfff1dc, 2.7);
+    keyLight.position.set(4.5, 6.5, 5.5);
+    scene.add(keyLight);
+    var rimLight = new THREE.DirectionalLight(0xff9a56, 1.6);
+    rimLight.position.set(-6, -3, 3);
+    scene.add(rimLight);
+    var fillLight = new THREE.PointLight(0xffc98f, 28, 34, 2);
+    fillLight.position.set(0, -4, 7);
+    scene.add(fillLight);
+    scene.environment = makeWarmEnv(THREE, renderer);
+
+    var state = {
+      THREE: THREE,
+      renderer: renderer,
+      scene: scene,
+      camera: camera,
+      CAM_Z: CAM_Z,
+      bodyGeo: makeBalloonGeometry(THREE),
+      knotGeo: new THREE.ConeGeometry(0.052, 0.1, 14),
+      stringGeo: makeStringGeometry(THREE),
+      shardGeo: new THREE.TetrahedronGeometry(0.055, 0),
+      balloons: [],
+      particles: [],
+      raycaster: new THREE.Raycaster(),
+      pointer: new THREE.Vector2(),
+      mouse: { x: 0, y: 0 },
+      scroll: 0,
+      time: 0,
+      running: false,
+      rafId: 0,
+      lastT: 0,
+      hoverAt: 0
+    };
+    engine3d = state;
+
+    build3DBalloons();
+    bind3DControls();
+
+    if (reduceMotion) {
+      update3D(0.001, 0);
+      render3D();
+    } else {
+      start3DLoop();
+    }
+
+    activeEngine = 'three';
+    balloonEls = [];
+    var party = $('#party');
+    if (party) party.classList.add('is-3d');
+    document.documentElement.setAttribute('data-engine', 'three');
+    window.__BIRTHDAY_3D__ = {
+      version: 'three-r158',
+      count: state.balloons.length,
+      running: function () { return state.running; },
+      screens: function () {
+        var v = new THREE.Vector3();
+        return state.balloons.map(function (b) {
+          b.group.getWorldPosition(v);
+          v.project(state.camera);
+          return {
+            x: (v.x * 0.5 + 0.5) * window.innerWidth,
+            y: (-v.y * 0.5 + 0.5) * window.innerHeight,
+            popped: b.popped
+          };
+        });
+      }
+    };
+  }
+
+  function bind3DControls() {
+    document.addEventListener('click', on3DClick, false);
+    document.addEventListener('pointermove', on3DPointerMove, { passive: true });
+    window.addEventListener('scroll', on3DScroll, { passive: true });
+    window.addEventListener('resize', on3DResize);
+    document.addEventListener('visibilitychange', on3DVisibility);
+  }
+
+  function on3DClick(e) {
+    if (activeEngine !== 'three' || !engine3d) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    var b = pick3D(e.clientX, e.clientY);
+    if (b) pop3D(b, e.clientX, e.clientY);
+  }
+
+  function on3DPointerMove(e) {
+    var s = engine3d;
+    if (!s) return;
+    s.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    s.mouse.y = -((e.clientY / window.innerHeight) * 2 - 1);
+    if (reduceMotion) return;
+    var now = performance.now();
+    if (now - s.hoverAt < 90) return;
+    s.hoverAt = now;
+    document.body.style.cursor = pick3D(e.clientX, e.clientY) ? 'pointer' : '';
+  }
+
+  function on3DScroll() {
+    var s = engine3d;
+    if (!s) return;
+    s.scroll = window.scrollY || document.documentElement.scrollTop || 0;
+    var party = $('#party');
+    if (party) party.classList.toggle('dim', s.scroll > 280);
+  }
+
+  function on3DResize() {
+    var s = engine3d;
+    if (!s) return;
+    s.camera.aspect = window.innerWidth / window.innerHeight;
+    s.camera.updateProjectionMatrix();
+    s.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    layout3D();
+    if (reduceMotion) { update3D(0.001, 0); render3D(); }
+  }
+
+  function on3DVisibility() {
+    if (!engine3d || reduceMotion) return;
+    if (document.hidden) stop3DLoop();
+    else start3DLoop();
+  }
+
+  function pick3D(cx, cy) {
+    var s = engine3d;
+    if (!s) return null;
+    s.pointer.set((cx / window.innerWidth) * 2 - 1, -((cy / window.innerHeight) * 2 - 1));
+    s.raycaster.setFromCamera(s.pointer, s.camera);
+    var meshes = [];
+    for (var i = 0; i < s.balloons.length; i++) {
+      var b = s.balloons[i];
+      if (!b.popped && !b.popping) meshes.push(b.body);
+    }
+    var hits = s.raycaster.intersectObjects(meshes, false);
+    return hits.length ? hits[0].object.userData.balloon : null;
+  }
+
+  function build3DBalloons() {
+    var s = engine3d;
+    if (!s) return;
+    var THREE = s.THREE;
+    s.balloons.forEach(function (b) {
+      s.scene.remove(b.group);
+      dispose3D(b);
+    });
+    s.balloons = [];
+    var layout = isSmallScreen() ? LAYOUT_MOBILE : LAYOUT_DESKTOP;
+    var count = Math.min(layout.length, CONFIG.party.balloons.length);
+    for (var i = 0; i < count; i++) {
+      var hex = CONFIG.party.colors[i % CONFIG.party.colors.length][1];
+      var color = new THREE.Color(hex);
+      var bodyMat = new THREE.MeshPhysicalMaterial({
+        color: color,
+        roughness: 0.14,
+        metalness: 0,
+        clearcoat: 1,
+        clearcoatRoughness: 0.14,
+        envMapIntensity: 1.25,
+        transparent: true,
+        opacity: 1
+      });
+      var body = new THREE.Mesh(s.bodyGeo, bodyMat);
+      var knotMat = new THREE.MeshStandardMaterial({
+        color: color.clone().multiplyScalar(0.6),
+        roughness: 0.6,
+        metalness: 0.05,
+        transparent: true,
+        opacity: 1
+      });
+      var knot = new THREE.Mesh(s.knotGeo, knotMat);
+      knot.position.y = -0.655;
+      knot.rotation.z = Math.PI;
+      var stringMat = new THREE.MeshStandardMaterial({ color: 0xa07d5c, roughness: 0.95, transparent: true, opacity: 0.5 });
+      var string = new THREE.Mesh(s.stringGeo, stringMat);
+      var group = new THREE.Group();
+      group.add(body);
+      group.add(knot);
+      group.add(string);
+      var b = {
+        index: i,
+        wish: CONFIG.party.balloons[i].wish,
+        group: group,
+        body: body,
+        materials: [bodyMat, knotMat, stringMat],
+        phase: i * 1.37,
+        popped: false,
+        popping: false,
+        popT: 0,
+        scale: 1,
+        baseX: 0, baseY: 0, baseZ: 0
+      };
+      body.userData.balloon = b;
+      s.scene.add(group);
+      s.balloons.push(b);
+    }
+    layout3D();
+    if (reduceMotion) { update3D(0.001, 0); render3D(); }
+  }
+
+  function layout3D() {
+    var s = engine3d;
+    if (!s) return;
+    var layout = isSmallScreen() ? LAYOUT_MOBILE : LAYOUT_DESKTOP;
+    var aspect = window.innerWidth / window.innerHeight;
+    var tanFov = Math.tan((s.camera.fov * Math.PI) / 360);
+    for (var i = 0; i < s.balloons.length; i++) {
+      var l = layout[i % layout.length];
+      var b = s.balloons[i];
+      var dist = s.CAM_Z - l.nz;
+      var halfH = tanFov * dist;
+      var halfW = halfH * aspect;
+      b.baseX = l.nx * halfW * 0.92;
+      b.baseY = l.ny * halfH * 0.86;
+      b.baseZ = l.nz;
+      b.scale = l.s;
+      b.group.scale.setScalar(l.s);
+      b.group.position.set(b.baseX, b.baseY, b.baseZ);
+    }
+  }
+
+  function pop3D(b, cx, cy) {
+    var s = engine3d;
+    if (!s || !b || b.popped) return;
+    b.popped = true;
+    poppedCount++;
+    if (reduceMotion) {
+      b.group.visible = false;
+      render3D();
+      afterPop(b.wish);
+    } else {
+      ring(cx, cy);
+      spawnShards(b);
+      b.popping = true;
+      b.popT = 0;
+      setTimeout(function () { afterPop(b.wish); }, 220);
+    }
+  }
+
+  function spawnShards(b) {
+    var s = engine3d;
+    if (!s) return;
+    var THREE = s.THREE;
+    var base = b.group.position;
+    var color = b.body.material.color;
+    for (var i = 0; i < 16; i++) {
+      var mat = new THREE.MeshBasicMaterial({ color: color.clone(), transparent: true, opacity: 1 });
+      var mesh = new THREE.Mesh(s.shardGeo, mat);
+      mesh.position.set(
+        base.x + (Math.random() - 0.5) * 0.55,
+        base.y + (Math.random() - 0.5) * 0.9,
+        base.z + (Math.random() - 0.5) * 0.3
+      );
+      mesh.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      s.scene.add(mesh);
+      s.particles.push({
+        mesh: mesh,
+        vx: (Math.random() - 0.5) * 3.6,
+        vy: Math.random() * 3.4 + 1.4,
+        vz: (Math.random() - 0.5) * 2.2,
+        spin: (Math.random() - 0.5) * 9,
+        life: 1.15
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    var s = engine3d;
+    if (!s) return;
+    for (var i = s.particles.length - 1; i >= 0; i--) {
+      var p = s.particles[i];
+      p.life -= dt;
+      p.vy -= 6.4 * dt;
+      p.mesh.position.x += p.vx * dt;
+      p.mesh.position.y += p.vy * dt;
+      p.mesh.position.z += p.vz * dt;
+      p.mesh.rotation.x += p.spin * dt;
+      p.mesh.rotation.y += p.spin * 0.7 * dt;
+      p.mesh.material.opacity = Math.max(0, Math.min(1, p.life / 0.5));
+      if (p.life <= 0) {
+        s.scene.remove(p.mesh);
+        p.mesh.material.dispose();
+        s.particles.splice(i, 1);
+      }
+    }
+  }
+
+  function update3D(t, dt) {
+    var s = engine3d;
+    if (!s) return;
+    s.camera.position.x += (s.mouse.x * 0.85 - s.camera.position.x) * 0.05;
+    s.camera.position.y += (s.mouse.y * 0.5 - s.camera.position.y) * 0.05;
+    s.camera.position.z = s.CAM_Z + Math.sin(t * 0.22) * 0.32 + Math.min(s.scroll, 700) * 0.0012;
+    s.camera.lookAt(0, 0, 0);
+    for (var i = 0; i < s.balloons.length; i++) {
+      var b = s.balloons[i];
+      if (b.popping) {
+        b.popT += dt;
+        var k = Math.min(1, b.popT / 0.32);
+        b.group.scale.setScalar(b.scale * (1 + k * 0.4));
+        for (var m = 0; m < b.materials.length; m++) b.materials[m].opacity = 1 - k;
+        if (k >= 1) { b.group.visible = false; b.popping = false; }
+        continue;
+      }
+      if (b.popped) continue;
+      b.group.position.x = b.baseX + Math.sin(t * 0.42 + b.phase * 1.7) * 0.08;
+      b.group.position.y = b.baseY + Math.sin(t * 0.55 + b.phase) * 0.3;
+      b.group.position.z = b.baseZ;
+      b.group.rotation.z = Math.sin(t * 0.5 + b.phase) * 0.06;
+      b.group.rotation.y = Math.sin(t * 0.33 + b.phase * 0.8) * 0.16;
+    }
+    updateParticles(dt);
+  }
+
+  function render3D() {
+    var s = engine3d;
+    if (!s) return;
+    s.renderer.render(s.scene, s.camera);
+  }
+
+  function start3DLoop() {
+    var s = engine3d;
+    if (!s || reduceMotion || s.running) return;
+    s.running = true;
+    s.lastT = performance.now();
+    function frame(now) {
+      var st = engine3d;
+      if (!st || !st.running) return;
+      var dt = Math.min(0.05, (now - st.lastT) / 1000);
+      if (dt < 0) dt = 0;
+      st.lastT = now;
+      st.time = now / 1000;
+      update3D(st.time, dt);
+      st.renderer.render(st.scene, st.camera);
+      st.rafId = requestAnimationFrame(frame);
+    }
+    s.rafId = requestAnimationFrame(frame);
+  }
+
+  function stop3DLoop() {
+    var s = engine3d;
+    if (!s) return;
+    s.running = false;
+    if (s.rafId) { cancelAnimationFrame(s.rafId); s.rafId = 0; }
+  }
+
+  function reset3D() {
+    var s = engine3d;
+    if (!s) return;
+    s.particles.forEach(function (p) { s.scene.remove(p.mesh); p.mesh.material.dispose(); });
+    s.particles = [];
+    poppedCount = 0;
+    build3DBalloons();
+    render3D();
+  }
+
+  function dispose3D(b) {
+    if (!b) return;
+    b.materials.forEach(function (m) { m.dispose(); });
+  }
+
+  function makeBalloonGeometry(THREE) {
+    var pts = [
+      [0.004, -1.06], [0.14, -1.01], [0.34, -0.9], [0.55, -0.7], [0.71, -0.4],
+      [0.79, -0.06], [0.8, 0.28], [0.73, 0.58], [0.57, 0.83], [0.32, 1.0], [0.006, 1.05]
+    ];
+    return new THREE.LatheGeometry(pts.map(function (p) {
+      return new THREE.Vector2(p[0] * 0.62, p[1] * 0.62);
+    }), 48);
+  }
+
+  function makeStringGeometry(THREE) {
+    var curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -0.66, 0),
+      new THREE.Vector3(0.05, -0.95, 0.02),
+      new THREE.Vector3(-0.06, -1.25, -0.01),
+      new THREE.Vector3(0.04, -1.55, 0.02),
+      new THREE.Vector3(-0.02, -1.85, 0)
+    ]);
+    return new THREE.TubeGeometry(curve, 24, 0.012, 5, false);
+  }
+
+  function makeWarmEnv(THREE, renderer) {
+    var c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 256;
+    var ctx = c.getContext('2d');
+    var g = ctx.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, '#6a4024');
+    g.addColorStop(0.42, '#2e1c11');
+    g.addColorStop(1, '#140b06');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 512, 256);
+    function glow(x, y, r, inner) {
+      var rg = ctx.createRadialGradient(x, y, 2, x, y, r);
+      rg.addColorStop(0, inner);
+      rg.addColorStop(1, 'rgba(255,220,170,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    glow(150, 78, 132, 'rgba(255,238,210,.95)');
+    glow(420, 150, 150, 'rgba(255,165,90,.7)');
+    var tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+    var pmrem = new THREE.PMREMGenerator(renderer);
+    if (pmrem.compileEquirectangularShader) pmrem.compileEquirectangularShader();
+    var rt = pmrem.fromEquirectangular(tex);
+    tex.dispose();
+    pmrem.dispose();
+    return rt.texture;
+  }
+
   function showMessage(line, sub, duration, allowReset) {
     if (!msgEl) return;
     msgLineEl.textContent = line || '';
@@ -1306,11 +1843,15 @@ textarea{min-height:104px;resize:vertical}
 
   function resetParty() {
     hideMessage();
-    var layer = $('#balloons');
-    if (layer) layer.innerHTML = '';
-    balloonEls = [];
-    poppedCount = 0;
-    buildBalloons();
+    if (activeEngine === 'three' && engine3d) {
+      reset3D();
+    } else {
+      var layer = $('#balloons');
+      if (layer) layer.innerHTML = '';
+      balloonEls = [];
+      poppedCount = 0;
+      buildCSSBalloons();
+    }
     setTimeout(function () {
       showMessage(CONFIG.party.message.line, CONFIG.party.message.sub, 5200, false);
     }, 320);
