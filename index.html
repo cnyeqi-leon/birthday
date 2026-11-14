@@ -306,7 +306,7 @@ h2{font-size:clamp(26px,4.8vw,34px);font-weight:600;line-height:1.25;letter-spac
 .field{display:flex;flex-direction:column;gap:8px}
 .field > label{font-size:11.5px;letter-spacing:.1em;color:var(--ink-subtle)}
 .field .opt{margin-left:8px;font-size:11px;letter-spacing:.02em;color:var(--ink-faint)}
-input[type=text],textarea{
+input[type=text],input[type=password],textarea{
   width:100%;background:var(--canvas);border:1px solid var(--line-strong);border-radius:8px;
   color:var(--ink);font-family:var(--font-sans);font-size:15px;line-height:1.7;padding:12px 14px;
   transition:border-color .2s,box-shadow .2s;outline:none
@@ -763,6 +763,32 @@ html.lb-open,html.lb-open body{overflow:hidden}
   .balloon.b2,.balloon.b4,.balloon.b5,.balloon.b7,.balloon.b8{display:none}
 }
 
+/* ============================================================
+   留言：送达状态 / 收件箱
+   ============================================================ */
+input[type=password]::placeholder{color:var(--ink-faint)}
+.gb-status{margin:4px 0 2px;font-size:12.5px;line-height:1.6;color:var(--ink-faint);min-height:1.2em}
+.gb-status.ok{color:#8fe0b0}
+.gb-status.warn{color:#e0b98f}
+.gb-status.sending{color:var(--ink-subtle)}
+.gb-note{margin:16px 0 0;padding-left:12px;border-left:2px solid var(--line);font-size:12.5px;line-height:1.8;color:var(--ink-subtle)}
+.msg-sent{margin-left:8px;padding:0 6px;border:1px solid rgba(143,224,176,.35);border-radius:999px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;color:#8fe0b0;vertical-align:1px}
+.inbox{margin-top:6px}
+.inbox-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:10px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.14em;color:var(--ink-faint)}
+.inbox-token{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px}
+.inbox-token input{flex:1 1 200px;margin-top:0}
+.inbox-token .btn{min-height:44px;flex:none}
+.inbox-state{margin:14px 0 0;font-size:12.5px;line-height:1.7;color:var(--ink-faint);min-height:1.2em}
+.inbox-state.err{color:#e0b98f}
+.inbox-list{display:flex;flex-direction:column}
+.ib{padding:16px 0;border-bottom:1px solid var(--line)}
+.ib-top{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+.ib-nick{font-size:13px;font-weight:500;color:var(--ink)}
+.ib time{flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint)}
+.ib-text{margin-top:6px;font-size:15px;line-height:1.8;color:var(--ink-muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.inbox-empty{padding:30px 0;text-align:center;color:var(--ink-faint);font-size:13.5px}
+.inbox-foot{display:flex;justify-content:flex-end;margin-top:6px}
+
 /* 减弱动效：所有动效关闭，只留静态祝福 */
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
@@ -890,16 +916,13 @@ html.lb-open,html.lb-open body{overflow:hidden}
     </div>
   </section>
 
-  <!-- ===================== 05 留言墙 ===================== -->
+  <!-- ===================== 05 留言墙（会传给寿星） ===================== -->
   <section class="section" id="guestbook">
     <div class="wrap">
       <header class="section-head" data-reveal>
-        <p class="eyebrow">04 · 明年</p>
-        <h2>写下一句话，明年再看</h2>
-        <p class="sub">
-          这个页面没有服务器：你写的话只保存在<em>这台设备的浏览器</em>里，刷新还在，别人看不到。<br>
-          明年今天再打开，看看当时写了什么。
-        </p>
+        <p class="eyebrow">04 · 留言</p>
+        <h2 id="gbTitle">写一句话，给寿星</h2>
+        <p class="sub" id="gbSub">留言会传给寿星做纪念；这台设备上也会留一份。</p>
       </header>
       <div class="card" data-reveal>
         <form class="gb-form" id="gbForm" novalidate>
@@ -909,20 +932,37 @@ html.lb-open,html.lb-open body{overflow:hidden}
           </div>
           <div class="field">
             <label for="gbText">写一句话<span class="opt">最多 200 字</span></label>
-            <textarea id="gbText" maxlength="200" placeholder="写给明年的一句话。"></textarea>
+            <textarea id="gbText" maxlength="200" placeholder="写一句祝福，寿星能看到。"></textarea>
             <div class="field-foot"><span id="gbCount">0 / 200</span></div>
           </div>
           <div class="gb-actions">
-            <button class="btn primary" type="submit">存进这台设备</button>
+            <button class="btn primary" type="submit" id="gbSubmit">送出留言</button>
             <button class="btn ghost" type="button" id="wishBtn">复制这句话</button>
           </div>
+          <p class="gb-status" id="gbStatus" aria-live="polite"></p>
         </form>
-        <div class="msgs-head">
-          <span>这台设备上的话 · 只有你能看到</span>
+        <p class="gb-note" id="gbNote">留言会传给寿星做纪念；服务器暂时连不上时，也会先存在这台设备上。</p>
+        <div class="msgs-head" id="msgsHead">
+          <span>本机留底 · 送达的会标「已送达」</span>
           <span id="msgCount"></span>
         </div>
         <div class="msgs" id="msgList"></div>
-        <div class="msgs-foot"><button class="linkbtn tiny" type="button" id="gbClear">清除这台设备上的话</button></div>
+        <div class="msgs-foot" id="msgsFoot"><button class="linkbtn tiny" type="button" id="gbClear">清除这台设备上的话</button></div>
+
+        <!-- 只读收件箱（?inbox=1） -->
+        <div class="inbox" id="inbox" hidden>
+          <div class="inbox-head">
+            <span>收件箱 · 只读</span>
+            <span id="inboxCount"></span>
+          </div>
+          <div class="inbox-token" id="inboxToken" hidden>
+            <input type="password" id="inboxKey" placeholder="收件箱口令" autocomplete="off">
+            <button class="btn ghost" id="inboxGo" type="button">打开</button>
+          </div>
+          <p class="inbox-state" id="inboxState" aria-live="polite"></p>
+          <div class="inbox-list" id="inboxList"></div>
+          <div class="inbox-foot"><button class="linkbtn tiny" type="button" id="inboxRetry">重新拉取</button></div>
+        </div>
       </div>
     </div>
   </section>
@@ -1033,13 +1073,19 @@ html.lb-open,html.lb-open body{overflow:hidden}
     /* 生日零点（北京时间）。倒计时跑到这个时刻为止，之后自动变成「已经十七岁」。 */
     birthday: '2026-11-19T00:00:00+08:00',
 
-    /* 时间线：四个阶段 + 一句话。现在都是占位，等真实素材再替换。 */
+    /* 时间线开关：false = 整块隐藏（不渲染、不占位），代码和文案都保留，改回 true 就出现 */
+    showTimeline: false,
+
+    /* 时间线文案：四个阶段 + 一句话 */
     timeline: [
-      { label: '童年', text: '待填' },
-      { label: '少年', text: '待填' },
-      { label: '苗寨夜', text: '待填' },
-      { label: '现在', text: '待填' }
+      { label: '童年', text: '被大人带着看山看水，照片里永远是笑' },
+      { label: '少年', text: '开始有自己的喜欢：夜骑、镜头、远方' },
+      { label: '苗寨夜', text: '灯一盏盏亮起来的那晚' },
+      { label: '现在', text: '十七岁，教室、卷子，还有没做完的事' }
     ],
+
+    /* 留言后端（寿星能看到）。后端没起来时自动只存本机 */
+    blessingApi: 'https://junshi-pc.tailf36923.ts.net:10000/api/blessing',
 
     keywords: [
       { word: '夜骑', line: '喜欢在没有人的路段，把城市骑成一条线。' },
@@ -1048,16 +1094,15 @@ html.lb-open,html.lb-open body{overflow:hidden}
       { word: '远方', line: '中东和阿拉伯世界，一直想去看看。' }
     ],
 
-    /* 照片：按成长时间排序；caption 是每格下方那句小字，先写「待填」。 */
+    /* 照片：按成长时间排序；caption 是每格下方那句小字 */
     photos: [
-      { file: 'assets/photos/1.jpg', label: '瀑布童年', caption: '待填' },
-      { file: 'assets/photos/2.jpg', label: '游乐场', caption: '待填' },
-      { file: 'assets/photos/3.jpg', label: '树叶挡脸', caption: '待填' },
-      { file: 'assets/photos/4.jpg', label: '折扇', caption: '待填' },
-      { file: 'assets/photos/5.jpg', label: '苗寨夜（抱臂）', caption: '待填' },
-      { file: 'assets/photos/6.jpg', label: '苗寨夜（提灯）', caption: '待填' },
-      { file: 'assets/photos/7.jpg', label: '高中校服', caption: '待填' },
-      { file: 'assets/photos/8.jpg', label: '橘猫', caption: '待填' }
+      { file: 'assets/photos/1.jpg', label: '瀑布童年', caption: '童年 · 瀑布旁边，笑得没心没肺' },
+      { file: 'assets/photos/2.jpg', label: '游乐场', caption: '游乐场里的小孩，手比耶' },
+      { file: 'assets/photos/3.jpg', label: '树叶挡脸', caption: '躲在树叶后面的夏天' },
+      { file: 'assets/photos/4.jpg', label: '折扇', caption: '一把折扇，装模作样' },
+      { file: 'assets/photos/5.jpg', label: '苗寨夜（抱臂）', caption: '苗寨的夜，第一次穿成这样' },
+      { file: 'assets/photos/6.jpg', label: '苗寨夜（提灯）', caption: '提一盏灯，走过风雨桥' },
+      { file: 'assets/photos/7.jpg', label: '橘猫', caption: '喜欢的东西，就画下来' }
     ],
 
     guestbook: {
@@ -1115,7 +1160,17 @@ html.lb-open,html.lb-open body{overflow:hidden}
   var pad2 = function (n) { return String(n).padStart(2, '0'); };
   var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var FORCE_NOW = false;
-  try { FORCE_NOW = new URLSearchParams(location.search).get('now') === '1'; } catch (e) {}
+  var BLESSING_API = CONFIG.blessingApi;
+  var INBOX_MODE = false;
+  var INBOX_KEY = '';
+  try {
+    var qp = new URLSearchParams(location.search);
+    FORCE_NOW = qp.get('now') === '1';
+    INBOX_MODE = qp.get('inbox') === '1';
+    INBOX_KEY = qp.get('k') || '';
+    var apiOverride = qp.get('api');
+    if (apiOverride) BLESSING_API = apiOverride;
+  } catch (e) {}
 
   var toastTimer = null;
   function toast(msg) {
@@ -1172,9 +1227,29 @@ html.lb-open,html.lb-open body{overflow:hidden}
     });
   }
 
+  /* 可见区块重新编号（时间线隐藏时从 01 开始） */
+  function renumberSections() {
+    var n = 0;
+    $$('.section').forEach(function (sec) {
+      if (sec.hidden) return;
+      n++;
+      var eb = sec.querySelector('.eyebrow');
+      if (!eb) return;
+      var txt = eb.textContent.replace(/^\s*\d+\s*·\s*/, '').trim();
+      eb.textContent = pad2(n) + ' · ' + txt;
+    });
+  }
+
   function renderTimeline() {
     var list = $('#timelineList');
+    var section = $('#timeline');
     if (!list) return;
+    if (!CONFIG.showTimeline) {
+      if (section) section.hidden = true;
+      renumberSections();
+      return;
+    }
+    if (section) section.hidden = false;
     list.innerHTML = CONFIG.timeline.map(function (t, i) {
       var text = t.text || '待填';
       var empty = !t.text || text.indexOf('待填') === 0;
@@ -1185,6 +1260,7 @@ html.lb-open,html.lb-open body{overflow:hidden}
         '<p class="tl-text">' + esc(text) + '</p>' +
         '</li>';
     }).join('');
+    renumberSections();
   }
 
   var ICONS = {
@@ -1856,7 +1932,7 @@ html.lb-open,html.lb-open body{overflow:hidden}
       if (!messages.length) {
         var empty = document.createElement('div');
         empty.className = 'msg-empty';
-        empty.textContent = '还没有。第一句，留给明年。';
+        empty.textContent = '还没有。第一句，写给他。';
         box.appendChild(empty);
         return;
       }
@@ -1871,6 +1947,12 @@ html.lb-open,html.lb-open body{overflow:hidden}
         var time = document.createElement('time');
         time.textContent = fmtTime(m.ts || Date.now());
         top.appendChild(name);
+        if (m.sent) {
+          var sent = document.createElement('span');
+          sent.className = 'msg-sent';
+          sent.textContent = '已送达';
+          top.appendChild(sent);
+        }
         top.appendChild(time);
         var text = document.createElement('p');
         text.className = 'msg-text';
@@ -1885,6 +1967,43 @@ html.lb-open,html.lb-open body{overflow:hidden}
     var nameEl = $('#gbName');
     var textEl = $('#gbText');
     var countEl = $('#gbCount');
+    var submitBtn = $('#gbSubmit');
+    var statusEl = $('#gbStatus');
+
+    function setStatus(text, kind) {
+      if (!statusEl) return;
+      statusEl.textContent = text || '';
+      statusEl.className = 'gb-status' + (kind ? ' ' + kind : '');
+    }
+
+    /* 把留言送到服务器（寿星能看到）；失败就只保留本机 */
+    function sendToServer(entry) {
+      if (!BLESSING_API) return Promise.resolve(false);
+      var ctrl = null;
+      var timer = 0;
+      try {
+        ctrl = new AbortController();
+        timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 8000);
+      } catch (e) { ctrl = null; }
+      return fetch(BLESSING_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: entry.n, text: entry.t }),
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store',
+        signal: ctrl ? ctrl.signal : undefined
+      }).then(function (r) {
+        clearTimeout(timer);
+        if (!r.ok) return false;
+        return r.json().then(function (data) {
+          return !(data && data.ok === false);
+        }, function () { return true; });
+      }, function () {
+        clearTimeout(timer);
+        return false;
+      });
+    }
 
     textEl.addEventListener('input', function () {
       countEl.textContent = textEl.value.length + ' / ' + MAX_TEXT;
@@ -1892,16 +2011,18 @@ html.lb-open,html.lb-open body{overflow:hidden}
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
+      if (form.dataset.busy === '1') return;
       var text = textEl.value.trim();
       if (!text) {
-        toast('写一句再存吧');
+        toast('写一句再送出');
         textEl.focus();
         return;
       }
       var entry = {
         n: (nameEl.value.trim() || '匿名朋友').slice(0, MAX_NAME),
         t: text.slice(0, MAX_TEXT),
-        ts: Date.now()
+        ts: Date.now(),
+        sent: false
       };
       messages.push(entry);
       if (!persist(messages)) {
@@ -1913,7 +2034,23 @@ html.lb-open,html.lb-open body{overflow:hidden}
       textEl.value = '';
       nameEl.value = '';
       countEl.textContent = '0 / ' + MAX_TEXT;
-      toast('已存进这台设备');
+      form.dataset.busy = '1';
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '正在送出…'; }
+      setStatus('正在送给寿星…', 'sending');
+      sendToServer(entry).then(function (ok) {
+        form.dataset.busy = '';
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '送出留言'; }
+        if (ok) {
+          entry.sent = true;
+          persist(messages);
+          render();
+          setStatus('已送达，寿星能看到', 'ok');
+          toast('已送达，寿星能看到');
+        } else {
+          setStatus('已存在本机（服务器暂时没连上，稍后再试）', 'warn');
+          toast('已存在本机');
+        }
+      });
     });
 
     $('#wishBtn').addEventListener('click', function () {
@@ -1940,7 +2077,7 @@ html.lb-open,html.lb-open body{overflow:hidden}
 
     $('#gbClear').addEventListener('click', function () {
       if (!messages.length) { toast('还没有留言'); return; }
-      if (!window.confirm('清除这台设备上的所有留言？清掉就找不回来了。')) return;
+      if (!window.confirm('清除这台设备上的所有留言？服务器上已送达的不会删。')) return;
       messages = [];
       persist(messages);
       render();
@@ -1948,6 +2085,107 @@ html.lb-open,html.lb-open body{overflow:hidden}
     });
 
     render();
+
+    /* ---------- ?inbox=1 只读收件箱 ---------- */
+    function initInboxMode() {
+      document.title = '留言收件箱｜俞叶祺 · 17';
+      var title = $('#gbTitle');
+      var sub = $('#gbSub');
+      if (title) title.textContent = '留言收件箱';
+      if (sub) sub.textContent = '只读 · 从服务器拉取的留言，给寿星自己看。';
+      if (form) form.hidden = true;
+      var noteEl = $('#gbNote');
+      if (noteEl) noteEl.hidden = true;
+      ['msgsHead', 'msgList', 'msgsFoot'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.hidden = true;
+      });
+      var inbox = $('#inbox');
+      if (!inbox) return;
+      inbox.hidden = false;
+      var listEl = $('#inboxList');
+      var countEl2 = $('#inboxCount');
+      var stateEl = $('#inboxState');
+      var tokenBox = $('#inboxToken');
+      var keyInput = $('#inboxKey');
+      var goBtn = $('#inboxGo');
+      var retryBtn = $('#inboxRetry');
+      var fetching = false;
+
+      function setState(txt, isErr) {
+        if (!stateEl) return;
+        stateEl.textContent = txt || '';
+        stateEl.className = 'inbox-state' + (isErr ? ' err' : '');
+      }
+
+      function renderItems(items) {
+        if (!listEl) return;
+        if (countEl2) countEl2.textContent = items.length ? items.length + ' 条' : '';
+        if (!items.length) {
+          listEl.innerHTML = '<div class="inbox-empty">还没有留言。</div>';
+          return;
+        }
+        listEl.innerHTML = items.map(function (it) {
+          var nick = esc(it.nick || it.name || '匿名同学');
+          var text = esc(it.text || it.content || '');
+          var when = String(it.ts || it.time || '').replace('T', ' ').slice(0, 16);
+          return '<article class="ib"><div class="ib-top"><span class="ib-nick">' + nick +
+            '</span><time>' + when + '</time></div><p class="ib-text">' + text + '</p></article>';
+        }).join('');
+      }
+
+      function fetchInbox(key) {
+        if (fetching) return;
+        fetching = true;
+        setState('正在拉取…');
+        if (tokenBox) tokenBox.hidden = true;
+        var url = BLESSING_API;
+        if (key) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'k=' + encodeURIComponent(key);
+        fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store' })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (data) {
+            fetching = false;
+            if (data && data.ok) {
+              var items = Array.isArray(data.items) ? data.items : (Array.isArray(data.blessings) ? data.blessings : []);
+              setState('');
+              renderItems(items);
+              try { if (key) sessionStorage.setItem('yeqi17.inbox.key', key); } catch (e) {}
+            } else {
+              var saved = '';
+              try { saved = sessionStorage.getItem('yeqi17.inbox.key') || ''; } catch (e) {}
+              if (!key && saved) { fetchInbox(saved); return; }
+              if (tokenBox) tokenBox.hidden = false;
+              setState(key ? '口令不对，或者服务器还没准备好。' : '需要口令才能看。口令在服务器的 token.txt 里。', true);
+            }
+          })
+          .catch(function () {
+            fetching = false;
+            if (tokenBox) tokenBox.hidden = false;
+            setState('暂时连不上服务器，稍后点「重新拉取」。', true);
+          });
+      }
+
+      var savedKey = '';
+      try { savedKey = sessionStorage.getItem('yeqi17.inbox.key') || ''; } catch (e) {}
+      var initial = INBOX_KEY || savedKey;
+      if (initial && keyInput) keyInput.value = initial;
+      fetchInbox(initial);
+      if (goBtn) goBtn.addEventListener('click', function () {
+        var v = keyInput ? keyInput.value.trim() : '';
+        if (v) fetchInbox(v);
+      });
+      if (keyInput) keyInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); if (goBtn) goBtn.click(); }
+      });
+      if (retryBtn) retryBtn.addEventListener('click', function () {
+        fetchInbox(keyInput ? keyInput.value.trim() : '');
+      });
+    }
+
+    if (INBOX_MODE) initInboxMode();
   }
 
   /* ============================================================ 分享 */
